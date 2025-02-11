@@ -3,7 +3,7 @@ import {z} from 'zod'
 
 
 
-export const userSchema = z.object({
+export const signInSchema = z.object({
     name:z.string(),
     password:z.string()
 })
