@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
-import { initDraw, updateDrawingMode } from "@/core/canvasLogic"
+import { clearAllShapes, initDraw, updateDrawingMode } from "@/core/canvasLogic"
 import { PropertiesPanel } from "./Properties-panel"
 import { FloatingDock } from "./ui/floating-dock"
 import { cn } from "@/lib/utils"
@@ -20,9 +20,10 @@ import {
   Minus,
   Type,
   Pencil,
+  MousePointer,
 } from "lucide-react"
 import { ThemeToggle } from "./Theme"
-export type PossibleShapes = "Rectangle" | "Circle" | "Triangle" | "Arrow" | "Diamond" | "Line" | "Text" | "Pencil"
+export type PossibleShapes = "Rectangle" | "Circle" | "Triangle" | "Arrow" | "Diamond" | "Line" | "Text" | "Pencil" | "Select"
 
 export type DrawingColor = "black" | "red" | "blue" | "green" | "yellow" | "purple"
 
@@ -34,12 +35,12 @@ export default function Canvas() {
   const [selectedColor, setSelectedColor] = useState<DrawingColor>("black")
   const [strokeWidth, setStrokeWidth] = useState<StrokeWidth>(2)
   const [showProperties, setShowProperties] = useState(false)
-  const [canvasInit,isCanvasInit]=useState(false);
+  const [canvasInit, isCanvasInit] = useState(false);
 
   const shapes = [
+    { shape: "Select" as PossibleShapes, icon: <MousePointer className="h-5 w-5" /> },
     { shape: "Rectangle" as PossibleShapes, icon: <Square className="h-5 w-5" /> },
     { shape: "Circle" as PossibleShapes, icon: <Circle className="h-5 w-5" /> },
-    { shape: "Triangle" as PossibleShapes, icon: <Triangle className="h-5 w-5" /> },
     { shape: "Arrow" as PossibleShapes, icon: <ArrowRight className="h-5 w-5" /> },
     { shape: "Diamond" as PossibleShapes, icon: <Diamond className="h-5 w-5" /> },
     { shape: "Line" as PossibleShapes, icon: <Minus className="h-5 w-5" /> },
@@ -59,11 +60,11 @@ export default function Canvas() {
     initializeCanvas()
   }, [initializeCanvas, selectedShape, selectedColor, strokeWidth])
 
-  useEffect(()=>{
-    if(canvasRef.current && canvasInit){
-        updateDrawingMode(selectedShape,selectedColor,strokeWidth);
+  useEffect(() => {
+    if(canvasRef.current && canvasInit) {
+        updateDrawingMode(selectedShape, selectedColor, strokeWidth);
     }
-  })
+  }, [selectedShape, selectedColor, strokeWidth, canvasInit])
   
 
   return (
@@ -102,7 +103,7 @@ export default function Canvas() {
       
 
       <div className="flex flex-1 overflow-hidden">
-      { showProperties&& (
+      { showProperties && (
           <PropertiesPanel
             selectedColor={selectedColor}
             setSelectedColor={setSelectedColor}
@@ -130,13 +131,31 @@ export default function Canvas() {
             ref={canvasRef}
             width={2000}
             height={1000}
-            className={cn("cursor-crosshair", selectedShape === "Pencil" && "cursor-pencil")}
+            className={cn(
+              selectedShape === "Select" ? "cursor-default" : "cursor-crosshair", 
+              selectedShape === "Pencil" && "cursor-pencil"
+            )}
           />
         </div>
 
-
+        {/* Properties Button */}
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="absolute bottom-6 right-6 z-10"
+          onClick={() => setShowProperties(!showProperties)}
+        >
+          Properties
+        </Button>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="absolute bottom-6 right-32 z-10"
+          onClick={() =>clearAllShapes()}
+        >
+          Clear Canvas
+        </Button>
       </div>
     </div>
   )
 }
-
