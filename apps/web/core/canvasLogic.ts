@@ -68,6 +68,10 @@ let currentColor: DrawingColor = "black";
 let currentStrokeWidth: StrokeWidth = 2;
 const drawnShapes: Shape[] = [];
 
+let selectionStart = 0;
+let selectionEnd = 0;
+let hasSelection = false;
+let cursorPosition = 0;
 // Text-specific variables
 let isAddingText = false;
 let currentFontSize = 20;
@@ -86,10 +90,19 @@ let dragOffsetX = 0;
 let dragOffsetY = 0;
 let dragStartPoint = { x: 0, y: 0 };
 
-// Event callback for shape mode changes
-let onModeChangeCallback: ((mode: possibleShapes) => void) | null = null;
 
 export function updateDrawingMode(shape: possibleShapes, color: DrawingColor = "black", strokeWidth: StrokeWidth = 2) {
+    // Properly clean up text editing before changing modes
+    if (activeTextShape && currentShape === "Text") {
+        finishTextEditing();
+        
+        // Reset isAddingText flag
+        isAddingText = false;
+        
+        // Reset drawing state
+        isDrawing = false;
+    }
+    
     currentShape = shape;
     currentColor = color;
     currentStrokeWidth = strokeWidth;
@@ -99,9 +112,9 @@ export function updateDrawingMode(shape: possibleShapes, color: DrawingColor = "
         selectedShapeIndex = null;
     }
     
-    // Cancel text editing if switching from text mode
-    if (activeTextShape && shape !== "Text") {
-        finishTextEditing();
+    // Redraw canvas to reflect changes
+    if (currentCanvas) {
+        clearCanvas(drawnShapes, currentCanvas);
     }
 }
 
@@ -135,6 +148,9 @@ function drawDiamond(ctx: CanvasRenderingContext2D, x: number, y: number, width:
 }
 
 export function initDraw(canvas: HTMLCanvasElement, type: possibleShapes) {
+    // Clean up any existing text editing
+    finishTextEditing();
+    
     // Assign to global ctx
     ctx = canvas.getContext("2d");
     if (!ctx) {
@@ -185,80 +201,64 @@ export function initDraw(canvas: HTMLCanvasElement, type: possibleShapes) {
             clearCanvas(tempShapes, canvas);
         }
     });
+    
+    // Reset drawing state
+    isDrawing = false;
+    isAddingText = false;
 }
 
 // Handle keyboard input for text editing
-// Handle keyboard input for text editing
 function handleKeyDown(e: KeyboardEvent) {
-    if (!activeTextShape || activeTextShape.type !== "Text") return;
-    
-    // Handle special keys
-    if (e.key === "Escape") {
-        finishTextEditing();
-        // Switch to select mode after pressing Escape
-        return;
-    }
-    
-    if (e.key === "Enter") {
-        // Create a new text element below the current one
-        const currentText = activeTextShape.text;
+    // Handle text editing if active
+    if (activeTextShape && activeTextShape.type === "Text") {
+        // Prevent the event from affecting other elements
         
-        // Store the properties we need before finishing editing the current text
-        const previousX = activeTextShape.x;
-        const previousY = activeTextShape.y;
-        const previousFontSize = activeTextShape.fontSize;
-        const previousColor = activeTextShape.color;
+        // Handle special keys
+        if (e.key === "Escape") {
+            finishTextEditing();
+            // Switch to select mode after pressing Escape
+            return;
+        }
         
-        const newY = previousY + previousFontSize * 1.2; // Add some line spacing
+        if (e.key === "Enter") {
+            // Add a newline character to the current text
+            activeTextShape.text += "\n";
+            
+            // Redraw canvas with updated text
+            if (currentCanvas) {
+                clearCanvas(drawnShapes, currentCanvas);
+            }
+            
+            // Focus on the canvas to receive keyboard input
+            if (currentCanvas) {
+                currentCanvas.focus();
+            }
+            
+            return;
+        }
         
-        // Complete the current text
-        finishTextEditing();
+        if (e.key === "Backspace") {
+            // Remove the last character
+            activeTextShape.text = activeTextShape.text.slice(0, -1);
+        } else if (e.key.length === 1) {
+            // Add regular characters
+            activeTextShape.text += e.key;
+        }
         
-        // Create a new text element
-        const newTextShape: Shape = {
-            type: "Text",
-            x: previousX,
-            y: newY,
-            text: "",
-            fontSize: previousFontSize,
-            color: previousColor,
-            isEditing: true
-        };
-        
-        drawnShapes.push(newTextShape);
-        selectedShapeIndex = drawnShapes.length - 1;
-        activeTextShape = newTextShape;
-        
-        // Start editing the new text
-        setupCursorBlink();
-        
-        // Redraw canvas
+        // Redraw canvas with updated text
         if (currentCanvas) {
             clearCanvas(drawnShapes, currentCanvas);
         }
+    } else {
+        // If not editing text, handle other keyboard shortcuts
         
-        // Focus on the canvas to receive keyboard input
-        if (currentCanvas) {
-            currentCanvas.focus();
+        // Delete key pressed and a shape is selected
+        if ((e.key === "Delete" || e.key === "Backspace") && selectedShapeIndex !== null) {
+            deleteSelectedShape();
+            e.preventDefault(); // Prevent browser back navigation on backspace
         }
-        
-        return;
-    }
-    
-    if (e.key === "Backspace") {
-        // Remove the last character
-        activeTextShape.text = activeTextShape.text.slice(0, -1);
-    } else if (e.key.length === 1) {
-        // Add regular characters
-        activeTextShape.text += e.key;
-    }
-    
-    // Redraw canvas with updated text
-    if (currentCanvas) {
-        clearCanvas(drawnShapes, currentCanvas);
     }
 }
-
 
 function distanceToLineSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
     const A = px - x1;
@@ -322,6 +322,7 @@ function isPointInsideShape(x: number, y: number, shape: Shape): boolean {
             return distanceToLineSegment(x, y, shape.x1, shape.y1, shape.x2, shape.y2) < 10;
         case "Pencil":
             // Check if point is near any segment of the pencil line
+            if (!shape.points) return false;
             for (let i = 1; i < shape.points.length; i++) {
                 const dist = distanceToLineSegment(
                     x, y,
@@ -331,18 +332,33 @@ function isPointInsideShape(x: number, y: number, shape: Shape): boolean {
                 if (dist < 10) return true;
             }
             return false;
-        case "Text":
-            // Estimate the text width based on the font size (approximate)
-            const textWidth = shape.text.length * (shape.fontSize * 0.6);
-            const textHeight = shape.fontSize;
-            
-            // Simple bounding box check for text
-            return (
-                x >= shape.x && 
-                x <= shape.x + textWidth && 
-                y >= shape.y - textHeight && 
-                y <= shape.y
-            );
+// Replace the text case in the isPointInsideShape function with this:
+
+case "Text":
+    if (!ctx) return false;
+    
+    // Set up font for measurement
+    ctx.font = `${shape.fontSize}px Arial, sans-serif`;
+    
+    // Handle multi-line text
+    const lines = shape.text.split('\n');
+    let maxWidth = 0;
+    
+    // Find the widest line
+    for (const line of lines) {
+        const lineWidth = ctx.measureText(line).width;
+        maxWidth = Math.max(maxWidth, lineWidth);
+    }
+    
+    const totalHeight = lines.length * shape.fontSize * 1.2;
+    
+    // More accurate bounding box check for text
+    return (
+        x >= shape.x - 2 && 
+        x <= shape.x + maxWidth + 4 && 
+        y >= shape.y - shape.fontSize - 2 && 
+        y <= shape.y - shape.fontSize + totalHeight + 2
+    );
         default:
             return false;
     }
@@ -393,6 +409,7 @@ function startTextEditing(textShape: Shape, x: number, y: number) {
     // Mark this shape as being edited
     textShape.isEditing = true;
     activeTextShape = textShape;
+    isAddingText = true;
     
     // Set up cursor blinking
     setupCursorBlink();
@@ -439,14 +456,28 @@ function finishTextEditing() {
     }
     
     activeTextShape = null;
+    isAddingText = false;
     
     if (currentCanvas) {
         clearCanvas(drawnShapes, currentCanvas);
     }
-    
-    // Switch to select mode after finishing text editing
 }
 
+
+function deleteSelectedShape() {
+    if (selectedShapeIndex !== null) {
+        // Remove the shape from the array
+        drawnShapes.splice(selectedShapeIndex, 1);
+        
+        // Reset selection
+        selectedShapeIndex = null;
+        
+        // Redraw canvas
+        if (currentCanvas) {
+            clearCanvas(drawnShapes, currentCanvas);
+        }
+    }
+}
 function handleMouseDown(e: MouseEvent) {
     if (!currentCanvas) return;
     
@@ -545,7 +576,11 @@ function handleMouseUp(e: MouseEvent) {
         return;
     }
     
-    if (!isDrawing || isAddingText) return;
+    // Don't process if we're not actually drawing or adding text
+    if (!isDrawing && !isAddingText) return;
+    
+    // If we're in text mode, leave it for text editing, don't finish drawing
+    if (isAddingText) return;
     
     isDrawing = false;
     
@@ -567,7 +602,6 @@ function handleMouseUp(e: MouseEvent) {
                 color: currentColor,
                 strokeWidth: currentStrokeWidth
             });
-            // Switch to select mode
             break;
         case "Circle":
             const radiusX = Math.abs(currentX - startX);
@@ -581,7 +615,6 @@ function handleMouseUp(e: MouseEvent) {
                 color: currentColor,
                 strokeWidth: currentStrokeWidth
             });
-            // Switch to select mode
             break;
         case "Diamond":
             drawnShapes.push({
@@ -593,7 +626,6 @@ function handleMouseUp(e: MouseEvent) {
                 color: currentColor,
                 strokeWidth: currentStrokeWidth
             });
-            // Switch to select mode
             break;
         case "Line":
             drawnShapes.push({
@@ -605,7 +637,6 @@ function handleMouseUp(e: MouseEvent) {
                 color: currentColor,
                 strokeWidth: currentStrokeWidth
             });
-            // Switch to select mode
             break;
         case "Arrow":
             // Calculate angle for arrowhead
@@ -623,7 +654,6 @@ function handleMouseUp(e: MouseEvent) {
                 color: currentColor,
                 strokeWidth: currentStrokeWidth
             });
-            // Switch to select mode
             break;
         case "Pencil":
             if (pencilPoints.length > 1) {
@@ -633,7 +663,6 @@ function handleMouseUp(e: MouseEvent) {
                     color: currentColor,
                     strokeWidth: currentStrokeWidth
                 });
-                // Switch to select mode
             }
             pencilPoints = [];
             break;
@@ -668,7 +697,7 @@ function handleMouseMove(e: MouseEvent) {
             
             // Update drag start point for next move
             dragStartPoint = { x: currentX, y: currentY };
-        } else if (shape?.type === "Pencil") {
+        } else if (shape?.type === "Pencil" && shape.points) {
             // Calculate movement delta
             const deltaX = currentX - dragStartPoint.x;
             const deltaY = currentY - dragStartPoint.y;
@@ -686,6 +715,9 @@ function handleMouseMove(e: MouseEvent) {
         clearCanvas(drawnShapes, currentCanvas);
         return;
     }
+    
+    // Don't do drawing preview if we're adding text
+    if (isAddingText) return;
     
     if (!isDrawing) {
         // Show cursor as pointer when hovering over a shape in select mode
@@ -785,6 +817,7 @@ function drawStraightArrow(ctx: CanvasRenderingContext2D, x1: number, y1: number
     // Draw arrowhead
     drawArrowhead(ctx, x2, y2, angle, arrowSize);
 }
+
 function clearCanvas(existingShapes: Shape[], canvas: HTMLCanvasElement) {
     const localCtx = canvas.getContext("2d");
     if (!localCtx) {
@@ -798,8 +831,10 @@ function clearCanvas(existingShapes: Shape[], canvas: HTMLCanvasElement) {
 
     // Redraw all saved shapes
     existingShapes.forEach((shape, index) => {
+        if (!shape) return;
+        
         // Set stroke style - use white for black color on dark background
-        const shapeColor = shape?.color === "black" ? "rgba(255,255,255)" : shape.color;
+        const shapeColor = shape.color === "black" ? "rgba(255,255,255)" : shape.color;
         localCtx.strokeStyle = shapeColor;
             
         // Set line width
@@ -810,7 +845,7 @@ function clearCanvas(existingShapes: Shape[], canvas: HTMLCanvasElement) {
             localCtx.strokeStyle = "rgba(0, 255, 255, 0.8)"; // Cyan for selected shape
         }
         
-        switch(shape?.type) {
+        switch(shape.type) {
             case 'rect':
                 localCtx.strokeRect(shape.x, shape.y, shape.width, shape.height);
                 break;
@@ -850,55 +885,84 @@ function clearCanvas(existingShapes: Shape[], canvas: HTMLCanvasElement) {
                     localCtx.stroke();
                 }
                 break;
-            case 'Text':
-                // Set text properties
-                localCtx.font = `${shape.fontSize}px Arial, sans-serif`;
-                localCtx.fillStyle = shapeColor;
-                
-                // Draw the text
-                localCtx.fillText(shape.text, shape.x, shape.y);
-                
-                // If this text is being edited, draw cursor
-                if (shape.isEditing && cursorVisible) {
-                    // Calculate cursor position based on text width
-                    const textWidth = localCtx.measureText(shape.text).width;
-                    
-                    // Draw cursor as a vertical line
-                    localCtx.beginPath();
-                    localCtx.moveTo(shape.x + textWidth, shape.y - shape.fontSize);
-                    localCtx.lineTo(shape.x + textWidth, shape.y);
-                    localCtx.strokeStyle = "rgba(255, 255, 255, 0.8)";
-                    localCtx.lineWidth = 1;
-                    localCtx.stroke();
-                }
-                
-                // If this text is selected, draw a highlight box
-                if (index === selectedShapeIndex) {
-                    // Use text measurement API for accurate width
-                    const textWidth = localCtx.measureText(shape.text).width;
-                    
-                    localCtx.strokeStyle = "rgba(0, 255, 255, 0.8)";
-                    localCtx.strokeRect(
-                        shape.x - 2, 
-                        shape.y - shape.fontSize - 2,
-                        textWidth + 4,
-                        shape.fontSize + 4
-                    );
-                }
-                break;
+                // Replace the text rendering section in the clearCanvas function with this improved version:
+
+case 'Text':
+    // Set text properties
+    localCtx.font = `${shape.fontSize}px Arial, sans-serif`;
+    localCtx.fillStyle = shapeColor;
+    
+    // Handle multi-line text
+    const lines = shape.text.split('\n');
+    let lineY = shape.y;
+    
+    for (let i = 0; i < lines.length; i++) {
+        // Draw each line of text
+        localCtx.fillText(lines[i], shape.x, lineY);
+        
+        // Move to next line
+        lineY += shape.fontSize * 1.2;
+    }
+    
+    // If this text is being edited, draw cursor
+    if (shape.isEditing && cursorVisible) {
+        // Calculate cursor position based on text width
+        const lastLine = lines[lines.length - 1];
+        const textWidth = localCtx.measureText(lastLine).width;
+        
+        // Draw cursor at the end of the current line, not the next line
+        const cursorY = shape.y + (lines.length - 1) * shape.fontSize * 1.2;
+        
+        // Draw cursor as a vertical line
+        localCtx.beginPath();
+        localCtx.moveTo(shape.x + textWidth, cursorY - shape.fontSize);
+        localCtx.lineTo(shape.x + textWidth, cursorY);
+        localCtx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+        localCtx.lineWidth = 1;
+        localCtx.stroke();
+    }
+
+    // If this text is selected, draw a highlight box
+    if (index === selectedShapeIndex) {
+        // Calculate overall width of the text box
+        let maxWidth = 0;
+        for (const line of lines) {
+            const lineWidth = localCtx.measureText(line).width;
+            maxWidth = Math.max(maxWidth, lineWidth);
         }
-    });
+
+        const totalHeight = lines.length * shape.fontSize * 1.2;
+
+        // Draw selection box from the top of the first line
+        localCtx.strokeStyle = "rgba(0, 255, 255, 0.8)";
+        localCtx.strokeRect(
+            shape.x - 2, 
+            shape.y - shape.fontSize - 2,
+            maxWidth + 4,
+            totalHeight + 4
+        );
+    }
+    break;
+}
+});
 }
 
 export function clearAllShapes(): void {
-    // Clear all shapes
-    drawnShapes.length = 0;
-    
-    // Reset selection
-    selectedShapeIndex = null;
-    
-    // Redraw the canvas
-    if (currentCanvas) {
-        clearCanvas(drawnShapes, currentCanvas);
-    }
+// Clean up text editing
+finishTextEditing();
+
+// Clear all shapes
+drawnShapes.length = 0;
+
+// Reset selection
+selectedShapeIndex = null;
+
+// Reset all drawing states
+isDrawing = false;
+isAddingText = false;
+
+// Redraw the canvas
+if (currentCanvas) {
+clearCanvas(drawnShapes, currentCanvas);
+}
 }

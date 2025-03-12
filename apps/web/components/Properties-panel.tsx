@@ -78,25 +78,6 @@ export function PropertiesPanel({
             <div className="h-2 w-6 bg-foreground rounded-full" />
           </div>
         </div>
-
-        <div className="space-y-2">
-          <h4 className="text-sm font-medium">Opacity</h4>
-          <Slider defaultValue={[100]} min={0} max={100} step={1} className="w-full" />
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>0%</span>
-            <span>50%</span>
-            <span>100%</span>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <h4 className="text-sm font-medium">Background</h4>
-          <div className="grid grid-cols-3 gap-2">
-            <button className="h-8 w-full rounded-md bg-white border border-border" />
-            <button className="h-8 w-full rounded-md bg-[#f5f5f5] border border-border" />
-            <button className="h-8 w-full rounded-md bg-zinc-800 border border-border" />
-          </div>
-        </div>
       </div>
     </div>
   )
