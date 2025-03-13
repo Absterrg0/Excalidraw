@@ -10,7 +10,6 @@ import {
   Download,
   Undo,
   Redo,
-  Save,
   Share2,
   Square,
   Circle,
@@ -84,10 +83,6 @@ export default function Canvas() {
           <Button variant="outline" size="sm">
             <Redo className="h-4 w-4 mr-1" />
             Redo
-          </Button>
-          <Button variant="outline" size="sm">
-            <Save className="h-4 w-4 mr-1" />
-            Save
           </Button>
           <Button variant="outline" size="sm">
             <Share2 className="h-4 w-4 mr-1" />
